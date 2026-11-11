@@ -1,0 +1,34 @@
+MIDI vers MP3 (Windows)
+=======================
+
+Convertit vos fichiers MIDI en MP3 dans votre navigateur. Tout reste sur votre ordinateur.
+
+PREMIER LANCEMENT (2 etapes)
+----------------------------
+1. Double-cliquez sur  installer-dependances.bat
+   Il installe FFmpeg, FluidSynth et une banque de sons (soundfont). Aucun droit administrateur
+   n'est necessaire. Il peut etre relance sans risque. A faire une seule fois.
+
+2. Double-cliquez sur  MIDI-vers-MP3.exe
+   Une fenetre noire s'ouvre, puis votre navigateur affiche l'application.
+   Pour arreter : fermez la fenetre noire.
+
+SI WINDOWS AFFICHE "Windows a protege votre ordinateur" (SmartScreen)
+---------------------------------------------------------------------
+Le programme n'est pas signe numeriquement. Cliquez sur "Informations complementaires",
+puis "Executer quand meme". Vous pouvez verifier l'integrite du zip avec le fichier .sha256
+publie a cote sur la page de telechargement.
+
+OU SONT MES MP3 ?
+-----------------
+Par defaut dans  Musique\MIDI vers MP3 . Dans l'application, le bouton "Parcourir..." permet
+de choisir n'importe quel autre dossier.
+
+PROBLEMES FREQUENTS
+-------------------
+- "Outil(s) introuvable(s)" : refaites l'etape 1, puis relancez le programme.
+- Le navigateur ne s'ouvre pas : ouvrez l'adresse affichee dans la fenetre noire (http://127.0.0.1:5000).
+- Aucun son / "soundfont" absente : placez un fichier .sf2 dans  %USERPROFILE%\soundfonts .
+
+Code source, aide et licence : voir le depot GitHub du projet (midi-to-mp3). Licence MIT.
+Mentions des composants tiers : THIRD_PARTY_NOTICES.md

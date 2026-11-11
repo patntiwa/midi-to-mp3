@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDI vers MP3</title>
+<style>
+  /* Direction : console de studio sur papier chaud.
+     Titres en serif, étiquettes en monospace, un seul accent ambre. */
+  :root {
+    --paper: #F1EEE7;
+    --surface: #FBFAF6;
+    --sunken: #E9E5DA;
+    --ink: #1C1A16;
+    --muted: #635B4E;
+    --line: #D6D0C2;
+    --line-strong: #8F8777;
+    --accent: #B93C0B;
+    --accent-hover: #9A3008;
+    --accent-ink: #FFFFFF;
+    --note: #B93C0B;
+    --note-soft: #E6A67E;
+    --ok: #2C6B3C;
+    --err: #B3261E;
+    --shadow: 0 1px 0 rgba(28,26,22,.04), 0 8px 24px -12px rgba(28,26,22,.18);
+    --radius: 10px;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #14130F;
+      --surface: #1D1B16;
+      --sunken: #100F0C;
+      --ink: #EEE9DD;
+      --muted: #A9A292;
+      --line: #322F27;
+      --line-strong: #6F6A5C;
+      --accent: #FFB454;
+      --accent-hover: #FFC57A;
+      --accent-ink: #1B1206;
+      --note: #FFB454;
+      --note-soft: #8A5A1F;
+      --ok: #7BD389;
+      --err: #FF8A7A;
+      --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 28px -14px rgba(0,0,0,.7);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); }
+  body {
+    margin: 0; color: var(--ink); accent-color: var(--accent);
+    font: 16px/1.55 var(--sans);
+    -webkit-font-smoothing: antialiased;
+    padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0);
+  }
+  main { max-width: 920px; margin: 0 auto; padding: 48px 20px 40px; }
+
+  /* En-tête */
+  .eyebrow { font: 500 .78rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0 0 14px; }
+  h1 { font: 600 clamp(2.4rem, 7vw, 3.8rem)/1.02 var(--serif); letter-spacing: -0.025em; margin: 0 0 14px; }
+  h1 em { font-style: italic; color: var(--accent); }
+  .lead { margin: 0 0 40px; color: var(--muted); max-width: 58ch; font-size: 1.05rem; }
+
+  /* Étiquettes d'étapes */
+  .step { display: flex; align-items: baseline; gap: 12px; margin: 40px 0 14px; }
+  .step.first { margin-top: 0; }
+  .step b { font: 500 .8rem/1 var(--mono); color: var(--accent); letter-spacing: .08em; }
+  .step h2 { font: 600 1.2rem/1.2 var(--serif); margin: 0; letter-spacing: -0.005em; }
+  .step::after { content: ""; flex: 1; height: 1px; background: var(--line); transform: translateY(-4px); }
+
+  /* Zone de dépôt : un piano roll avec tête de lecture */
+  .drop {
+    position: relative; display: block; cursor: pointer; overflow: hidden;
+    min-height: 224px; border: 1px solid var(--line-strong); border-radius: var(--radius);
+    background-color: var(--surface);
+    background-image:
+      repeating-linear-gradient(to bottom, transparent 0 27px, var(--line) 27px 28px),
+      repeating-linear-gradient(to right, transparent 0 55px, var(--line) 55px 56px);
+    box-shadow: var(--shadow);
+    transition: border-color .2s, transform .2s;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop.over { transform: scale(1.008); }
+  .drop:focus-within { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .drop input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+  .roll span { position: absolute; height: 28px; background: var(--note); border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); transition: filter .25s, transform .25s; }
+  .roll span:nth-child(3n+2) { background: var(--note-soft); }
+  .drop:hover .roll span, .drop.over .roll span { filter: saturate(1.25) brightness(1.06); }
+  .drop.over .roll span:nth-child(even) { transform: translateY(-4px); }
+  .drop.over .roll span:nth-child(odd) { transform: translateY(4px); }
+  .playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--accent); opacity: 0; box-shadow: 0 0 14px var(--accent); pointer-events: none; }
+  .drop:hover .playhead, .drop.over .playhead { opacity: .85; animation: sweep 3.2s linear infinite; }
+  @keyframes sweep { from { left: 0; } to { left: 100%; } }
+  .plate {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius);
+    padding: 20px 26px; text-align: center; width: min(88%, 400px);
+    box-shadow: 0 10px 30px -12px rgba(28,26,22,.35);
+  }
+  .plate em { display: block; font: 500 .74rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-style: normal; margin-bottom: 8px; }
+  .plate strong { display: block; font: 600 1.25rem/1.25 var(--serif); }
+  .plate small { display: block; margin-top: 6px; color: var(--muted); font-size: .88rem; }
+  .drop.over .plate { border-color: var(--accent); }
+
+  /* Réglages : deux groupes, « Son » et « Export » */
+  .panels { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); align-items: start; }
+  fieldset { margin: 0; padding: 20px 22px 22px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); min-width: 0; display: grid; gap: 20px; }
+  legend { padding: 0 8px; margin-left: -8px; font: 600 1.05rem/1.2 var(--serif); }
+  .field { display: grid; gap: 8px; font-size: .95rem; align-content: start; }
+  .field > .lbl, label.field > span:first-child { font: 500 .74rem/1.2 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .field output.val { color: var(--accent); font-weight: 600; }
+  select, input[type=text] {
+    width: 100%; font: inherit; color: var(--ink); background-color: var(--paper);
+    border: 1px solid var(--line-strong); border-radius: 8px; padding: 11px 12px; min-height: 44px; transition: border-color .15s;
+  }
+  select {
+    appearance: none; -webkit-appearance: none; padding-right: 36px; cursor: pointer;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 19px) 52%, calc(100% - 14px) 52%;
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+  }
+  select:hover:not(:disabled), input[type=text]:hover, input[type=text]:focus { border-color: var(--accent); }
+  select:disabled { opacity: .6; cursor: not-allowed; }
+  input[type=text]::placeholder { color: var(--muted); opacity: 1; }
+  .hint { color: var(--muted); font-size: .84rem; margin: 0; }
+
+  /* Curseur de volume */
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; background: transparent; cursor: pointer; margin: 0; }
+  input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: var(--sunken); border: 1px solid var(--line-strong); }
+  input[type=range]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--sunken); border: 1px solid var(--line-strong); }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 22px; height: 22px; margin-top: -9px; border-radius: 50%; background: var(--accent); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--accent), 0 2px 6px rgba(0,0,0,.25); transition: transform .12s; }
+  input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--accent), 0 2px 6px rgba(0,0,0,.25); }
+  input[type=range]:hover::-webkit-slider-thumb { transform: scale(1.12); }
+
+  /* Interrupteurs : <input type="checkbox" switch>, habillés ici pour tous les navigateurs */
+  .switches { display: flex; flex-wrap: wrap; gap: 8px 26px; }
+  .switches label { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; min-height: 44px; }
+  input[type=checkbox] {
+    appearance: none; -webkit-appearance: none; flex: none; position: relative; margin: 0;
+    width: 42px; height: 24px; border-radius: 12px; cursor: pointer;
+    background: var(--sunken); border: 1px solid var(--line-strong);
+    transition: background .18s, border-color .18s;
+  }
+  input[type=checkbox]::before {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--muted); transition: transform .18s, background .18s;
+  }
+  input[type=checkbox]:checked { background: var(--accent); border-color: var(--accent); }
+  input[type=checkbox]:checked::before { transform: translateX(18px); background: var(--accent-ink); }
+  input[type=checkbox]:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+  /* Destination : dossier + sous-dossier sur un bloc compact */
+  .dest { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--paper); }
+  .root { font: .82rem/1.4 var(--mono); color: var(--ink); overflow-wrap: anywhere; }
+  .dest-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .dest-row input { flex: 1 1 180px; width: auto; }
+
+  /* Boutons */
+  button {
+    font: inherit; font-weight: 600; cursor: pointer; border-radius: 8px;
+    padding: 13px 26px; border: 1px solid var(--accent);
+    background: var(--accent); color: var(--accent-ink);
+    box-shadow: 0 6px 16px -8px var(--accent);
+    transition: background .15s, transform .1s, box-shadow .15s, border-color .15s;
+  }
+  button:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  button:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
+  button.ghost { background: transparent; color: var(--ink); border-color: var(--line-strong); padding: 10px 16px; min-height: 44px; font-weight: 500; font-size: .95rem; box-shadow: none; }
+  button.ghost:hover:not(:disabled) { background: var(--sunken); border-color: var(--ink); }
+  button:disabled { cursor: not-allowed; background: var(--sunken); color: var(--muted); border-color: var(--line); box-shadow: none; }
+  button.ghost:disabled { background: transparent; opacity: .6; }
+  button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  #go::after { content: " →"; }
+  #go.running::after { content: none; }
+
+  /* Zone de dépôt : liste des fichiers juste en dessous */
+  ul { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 12px; }
+  ul:empty { display: none; }
+  #emptyList { margin-top: 14px; }
+  li.item { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); padding: 16px 18px; box-shadow: var(--shadow); animation: rise .3s ease-out both; transition: border-color .2s; }
+  li.item.done { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+  li.item.failed { border-color: color-mix(in srgb, var(--err) 50%, var(--line)); }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+  .file { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  .badge { flex: none; width: 42px; height: 42px; display: grid; place-items: center; border-radius: 8px; background: var(--sunken); border: 1px solid var(--line); font: 600 .7rem/1 var(--mono); letter-spacing: .06em; color: var(--accent); }
+  .name { font-weight: 600; overflow-wrap: anywhere; line-height: 1.3; }
+  .meta { color: var(--muted); font: .82rem/1.4 var(--mono); }
+  .side { display: flex; align-items: center; gap: 12px; }
+  .chip { font: 500 .78rem/1 var(--mono); padding: 7px 11px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--muted); white-space: nowrap; }
+  .chip.state-ok { color: var(--ok); border-color: currentColor; font-weight: 600; }
+  .chip.state-err { color: var(--err); border-color: currentColor; font-weight: 600; white-space: normal; }
+  .busy .chip { color: var(--accent); border-color: var(--accent); }
+  .result { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--line-strong); }
+  .result audio { flex: 1 1 260px; min-width: 0; max-width: 100%; height: 44px; }
+  .result a { color: var(--accent); font-weight: 600; text-underline-offset: 3px; min-height: 44px; display: inline-flex; align-items: center; }
+  .result a:hover { color: var(--accent-hover); }
+  .saved { font: .8rem/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; flex: 1 1 100%; }
+
+  /* Barres de progression : <progress> natif (guide « progress »), habillé pour les deux moteurs */
+  progress {
+    appearance: none; -webkit-appearance: none; border: 0 solid; overflow: clip;
+    display: block; width: 100%; height: 8px; margin-top: 14px; border-radius: 1e5px;
+    background: var(--sunken); box-shadow: inset 0 0 0 1px var(--line-strong);
+    container-type: inline-size;
+    --progress-bar-indeterminate-size: 30%;
+    --progress-bar-indeterminate-animation-duration: 1.5s;
+  }
+  progress::-webkit-progress-bar { background: transparent; }
+  progress::-webkit-progress-value { background: var(--progress-fill, var(--accent)); border-radius: 1e5px; transition: inline-size .3s; animation: var(--progress-bar-animation, revert-rule); }
+  progress::-moz-progress-bar { background: var(--progress-fill, var(--accent)); border-radius: 1e5px; animation: var(--progress-bar-animation, revert-rule); }
+  progress:indeterminate { --progress-bar-animation: progress-bar-indeterminate var(--progress-bar-indeterminate-animation-duration) infinite linear; }
+  progress:indeterminate:dir(rtl) { --progress-bar-animation: progress-bar-indeterminate var(--progress-bar-indeterminate-animation-duration) infinite linear reverse; }
+  @keyframes progress-bar-indeterminate {
+    from, to { inline-size: var(--progress-bar-indeterminate-size); margin-right: auto; }
+    from { translate: -100%; }
+    to { translate: 100cqi; }
+  }
+  li.item.done progress, .overall.finished progress { --progress-fill: var(--ok); }
+  li.item.failed progress { --progress-fill: var(--err); }
+
+  /* Conversion et progression globale */
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  #status { color: var(--muted); min-height: 1.5em; font-size: .95rem; }
+  #status.err { color: var(--err); }
+  .overall { margin-top: 20px; padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+  .overall[hidden] { display: none; }
+  .overall-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: .95rem; }
+  .overall-head b { font: 600 1.1rem/1 var(--mono); color: var(--accent); }
+  .overall.finished .overall-head b { color: var(--ok); }
+  .overall progress { height: 12px; margin-top: 10px; }
+
+  footer { max-width: 920px; margin: 0 auto; padding: 0 20px 48px; color: var(--muted); font: .8rem/1.5 var(--mono); }
+
+  /* Sélecteur de dossier : <dialog> natif */
+  dialog { width: min(560px, calc(100vw - 32px)); max-height: min(640px, calc(100vh - 32px)); padding: 22px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface); color: var(--ink); box-shadow: 0 30px 80px -20px rgba(0,0,0,.55); }
+  dialog[open] { display: flex; flex-direction: column; gap: 12px; animation: rise .2s ease-out; }
+  dialog:modal { overscroll-behavior: contain; }
+  dialog::backdrop { background: rgba(10,9,6,.6); backdrop-filter: blur(2px); overflow: hidden; overscroll-behavior: contain; }
+  dialog h2 { font: 600 1.3rem/1.2 var(--serif); margin: 0; }
+  .crumb { font: .85rem/1.4 var(--mono); padding: 8px 12px; border-radius: 8px; background: var(--sunken); border: 1px solid var(--line); overflow-wrap: anywhere; }
+  .dlg-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+  .newdir { display: flex; gap: 8px; }
+  .newdir[hidden] { display: none; }
+  .newdir input { flex: 1; }
+  ul.dirs { margin: 0; flex: 1; min-height: 140px; overflow: auto; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 4px; background: var(--paper); overscroll-behavior: contain; }
+  .dirs button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; text-align: left; background: transparent; color: var(--ink); border: 0; box-shadow: none; padding: 9px 10px; font-weight: 500; border-radius: 6px; overflow-wrap: anywhere; }
+  .dirs button::before { content: "▸"; color: var(--accent); }
+  .dirs button:hover:not(:disabled) { background: var(--sunken); }
+  .dlg-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .dlg-actions button { padding: 10px 18px; }
+
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    progress { --progress-bar-indeterminate-animation-duration: 10s; }   /* ralentie, jamais supprimée */
+    .drop:hover .playhead, .drop.over .playhead { animation: none; left: 50%; }
+    li.item, dialog[open] { animation: none; }
+    .drop.over, .drop.over .roll span { transform: none !important; }
+    * { transition-duration: .01ms !important; }
+  }
+  @media (max-width: 520px) {
+    main { padding-top: 32px; }
+    .plate { padding: 16px 18px; }
+    .side { width: 100%; justify-content: space-between; }
+    button#go { flex: 1 1 100%; }
+    fieldset { padding: 18px 16px 20px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">.mid → .mp3</p>
+  <h1>MIDI vers <em>MP3</em></h1>
+  <p class="lead">Déposez un ou plusieurs fichiers MIDI. Le son est généré avec une soundfont puis encodé en MP3 haute qualité.</p>
+
+  <div class="step first"><b>01</b><h2>Fichiers</h2></div>
+  <label class="drop" id="drop">
+    <span class="roll" aria-hidden="true">
+      <span style="top:28px;left:56px;width:112px"></span>
+      <span style="top:56px;left:168px;width:56px"></span>
+      <span style="top:0;left:224px;width:168px"></span>
+      <span style="top:84px;left:392px;width:112px"></span>
+      <span style="top:28px;left:504px;width:56px"></span>
+      <span style="top:140px;left:56px;width:224px"></span>
+      <span style="top:112px;left:336px;width:56px"></span>
+      <span style="top:168px;left:448px;width:168px"></span>
+      <span style="top:56px;left:616px;width:112px"></span>
+      <span style="top:112px;left:672px;width:168px"></span>
+    </span>
+    <span class="playhead" aria-hidden="true"></span>
+    <span class="plate">
+      <em>↓ Déposer</em>
+      <strong>Glissez vos fichiers MIDI ici</strong>
+      <small>ou cliquez pour les choisir (.mid, .midi, .kar, 10 Mo max chacun)</small>
+    </span>
+    <input type="file" id="picker" accept=".mid,.midi,.kar,audio/midi,audio/x-midi" multiple>
+  </label>
+  <p class="hint" id="emptyList">Aucun fichier pour l’instant. Ceux que vous ajoutez apparaissent ici.</p>
+  <ul id="list" aria-label="Fichiers à convertir"></ul>
+
+  <div class="step"><b>02</b><h2>Réglages</h2></div>
+  <div class="panels">
+    <fieldset>
+      <legend>Son</legend>
+      <label class="field">
+        <span>Soundfont</span>
+        <select id="soundfont"></select>
+        <span class="hint" id="sfHint">Elle détermine l’essentiel de la qualité du son.</span>
+      </label>
+      <label class="field">
+        <span>Volume du synthétiseur : <output id="gainOut" class="val">0,8</output></span>
+        <input type="range" id="gain" min="0.3" max="1.5" step="0.1" value="0.8">
+        <span class="hint">Baissez si le son sature.</span>
+      </label>
+      <div class="switches">
+        <label><input type="checkbox" id="reverb" switch checked> Réverbération</label>
+        <label><input type="checkbox" id="chorus" switch checked> Chorus</label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Export</legend>
+      <label class="field">
+        <span>Qualité MP3</span>
+        <select id="quality">
+          <option value="cbr320">320 kbps (constant)</option>
+          <option value="vbr">VBR V0 (très haute qualité, plus léger)</option>
+          <option value="cbr256">256 kbps</option>
+          <option value="cbr192">192 kbps</option>
+        </select>
+      </label>
+      <div class="field" role="group" aria-labelledby="outLbl">
+        <span class="lbl" id="outLbl">Dossier de sortie</span>
+        <div class="dest">
+          <output class="root" id="rootPath">…</output>
+          <div class="dest-row">
+            <input type="text" id="folder" maxlength="120" aria-label="Sous-dossier facultatif" placeholder="sous-dossier (facultatif)" autocomplete="off" spellcheck="false">
+            <button type="button" id="browse" class="ghost" hidden>Parcourir…</button>
+          </div>
+        </div>
+        <span class="hint" id="outHint">Les MP3 sont enregistrés ici.</span>
+      </div>
+      <div class="switches">
+        <label><input type="checkbox" id="normalize" switch> Normaliser le volume</label>
+      </div>
+    </fieldset>
+  </div>
+
+  <div class="step"><b>03</b><h2>Conversion</h2></div>
+  <div class="bar">
+    <button type="button" id="go" disabled>Convertir</button>
+    <button type="button" id="clear" class="ghost" disabled>Vider la liste</button>
+    <span id="status" role="status" aria-live="polite"></span>
+  </div>
+
+  <div class="overall" id="overall" hidden>
+    <div class="overall-head"><span id="overallLabel"></span><b id="overallPct">0 %</b></div>
+    <progress id="overallBar" max="100" value="0" aria-labelledby="overallLabel"></progress>
+  </div>
+</main>
+<footer>MIDI vers MP3 <span id="ver"></span> · Licence MIT · tout reste sur votre ordinateur</footer>
+
+<dialog id="dlg" aria-labelledby="dlgTitle" closedby="any">
+  <h2 id="dlgTitle">Choisir le dossier de sortie</h2>
+  <div class="crumb" id="dlgPath" aria-live="polite"></div>
+  <div class="dlg-tools">
+    <button type="button" class="ghost" id="dlgUp">↑ Dossier parent</button>
+    <button type="button" class="ghost" id="dlgNew">+ Nouveau dossier</button>
+  </div>
+  <form class="newdir" id="newForm" hidden>
+    <input type="text" id="newName" maxlength="100" placeholder="Nom du nouveau dossier" aria-label="Nom du nouveau dossier" autocomplete="off" spellcheck="false">
+    <button type="submit" class="ghost">Créer</button>
+  </form>
+  <ul class="dirs" id="dlgList" aria-label="Sous-dossiers"></ul>
+  <p class="hint" id="dlgMsg" role="status"></p>
+  <div class="dlg-actions">
+    <button type="button" class="ghost" id="dlgCancel" command="close" commandfor="dlg">Annuler</button>
+    <button type="button" id="dlgOk" autofocus>Choisir ce dossier</button>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const MAX_BYTES = 10 * 1024 * 1024;
+  const $ = (id) => document.getElementById(id);
+  const items = [];
+  let running = false;
+
+  const fmtSize = (n) => n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' Ko' : (n / 1048576).toFixed(1).replace('.', ',') + ' Mo';
+  const plural = (n, one, many) => n + ' ' + (n > 1 ? many : one);
+  const setStatus = (msg, isErr = false) => { const s = $('status'); s.textContent = msg; s.className = isErr ? 'err' : ''; };
+
+  // --- Soundfonts ---
+  fetch('/api/soundfonts').then(r => r.json()).then(list => {
+    const sel = $('soundfont');
+    if (!list.length) {
+      const o = document.createElement('option'); o.textContent = 'Aucune soundfont disponible'; o.value = '';
+      sel.appendChild(o); sel.disabled = true;
+      $('sfHint').textContent = 'Lancez installer-dependances.bat, ou placez un fichier .sf2 dans le dossier « soundfonts » (ou dans votre dossier utilisateur), puis rechargez.';
+      return;
+    }
+    list.forEach(f => {
+      const o = document.createElement('option');
+      o.value = f.name; o.textContent = f.name + ' (' + f.size_mb.toString().replace('.', ',') + ' Mo)';
+      sel.appendChild(o);
+    });
+    refresh();
+  }).catch(() => setStatus('Impossible de joindre le serveur.', true));
+
+  // --- Dossier de sortie ---
+  let outRoot = '';   // dossier par défaut du serveur
+  let outDir = '';    // dossier choisi dans l'interface ('' = dossier par défaut)
+  const store = {
+    get: (k) => { try { return localStorage.getItem(k) || ''; } catch (_) { return ''; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} },
+  };
+  const showOut = () => { $('rootPath').textContent = outDir || outRoot || 'indisponible'; };
+
+  fetch('/api/config').then(r => r.json()).then(async c => {
+    outRoot = c.output_root;
+    if (c.version) $('ver').textContent = 'v' + c.version;
+    if (c.can_browse) {
+      $('browse').hidden = false;
+      const saved = store.get('midi2mp3.outdir');
+      if (saved) {          // on ne réutilise le dernier dossier que s'il existe encore
+        const r = await fetch('/api/browse?path=' + encodeURIComponent(saved)).catch(() => null);
+        if (r && r.ok) outDir = saved;
+      }
+    } else {
+      $('outHint').textContent = 'Le choix du dossier est désactivé quand le serveur est accessible depuis le réseau.';
+    }
+    showOut();
+  }).catch(() => showOut());
+  $('folder').value = store.get('midi2mp3.folder');
+  $('folder').addEventListener('change', () => store.set('midi2mp3.folder', $('folder').value.trim()));
+
+  // --- Sélecteur de dossier ---
+  const dlg = $('dlg');
+  let cur = '', parentPath = null;
+  async function loadDir(path) {
+    $('dlgMsg').textContent = '';
+    let j = {};
+    try {
+      const r = await fetch('/api/browse?path=' + encodeURIComponent(path));
+      j = await r.json().catch(() => ({}));
+      if (!r.ok) { $('dlgMsg').textContent = j.error || 'Erreur ' + r.status; return; }
+    } catch (_) { $('dlgMsg').textContent = 'Connexion au serveur impossible.'; return; }
+    cur = j.path; parentPath = j.parent;
+    $('dlgPath').textContent = j.path || 'Ordinateur (choisissez un lecteur)';
+    $('dlgUp').disabled = j.parent === null;
+    $('dlgOk').disabled = !j.path || !j.writable;
+    $('dlgNew').disabled = !j.path || !j.writable;
+    $('newForm').hidden = true;
+    const list = $('dlgList'); list.textContent = '';
+    for (const d of j.dirs) {
+      const li = document.createElement('li'), b = document.createElement('button');
+      b.type = 'button'; b.textContent = d.name; b.addEventListener('click', () => loadDir(d.path));
+      li.appendChild(b); list.appendChild(li);
+    }
+    $('dlgMsg').textContent = j.path && !j.writable ? 'Ce dossier n’est pas accessible en écriture.'
+      : (j.dirs.length ? '' : 'Aucun sous-dossier ici.');
+  }
+  $('browse').addEventListener('click', async () => {
+    dlg.showModal();
+    await loadDir(outDir || outRoot);
+    if (!$('dlgOk').disabled) $('dlgOk').focus();    // l'attribut autofocus a joué avant la fin du chargement
+  });
+  $('dlgUp').addEventListener('click', () => loadDir(parentPath));
+  $('dlgOk').addEventListener('click', () => {
+    outDir = cur; store.set('midi2mp3.outdir', outDir); showOut(); dlg.close();
+  });
+  // Repli pour les navigateurs sans commandes déclaratives (command / commandfor)
+  if (!('commandForElement' in HTMLButtonElement.prototype)) $('dlgCancel').addEventListener('click', () => dlg.close());
+  // Repli de closedby="any" (clic à l'extérieur) pour les navigateurs qui ne le gèrent pas encore
+  if (!('closedBy' in HTMLDialogElement.prototype)) {
+    const outside = (e) => { const r = dlg.getBoundingClientRect(); return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom; };
+    let pressedOutside = false;
+    dlg.addEventListener('pointerdown', (e) => { pressedOutside = outside(e); });
+    dlg.addEventListener('pointerup', (e) => { if (pressedOutside && outside(e)) dlg.close(); });
+  }
+  $('dlgNew').addEventListener('click', () => { $('newForm').hidden = false; $('newName').value = ''; $('newName').focus(); });
+  $('newForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('newName').value.trim(); if (!name) return;
+    const r = await fetch('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parent: cur, name }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    if (r && r.ok) loadDir(j.path); else $('dlgMsg').textContent = (j && j.error) || 'Création impossible.';
+  });
+
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const pct = (p) => Math.round(Math.max(0, Math.min(1, p)) * 100);
+
+  $('gain').addEventListener('input', e => { $('gainOut').textContent = Number(e.target.value).toFixed(1).replace('.', ','); });
+
+  // --- Ajout de fichiers ---
+  function addFiles(fileList) {
+    const rejected = [];
+    for (const f of fileList) {
+      if (!/\.(mid|midi|kar)$/i.test(f.name)) { rejected.push(f.name + ' (format non pris en charge)'); continue; }
+      if (f.size > MAX_BYTES) { rejected.push(f.name + ' (plus de 10 Mo)'); continue; }
+      if (f.size === 0) { rejected.push(f.name + ' (fichier vide)'); continue; }
+      const it = { file: f, state: 'pending' };
+      it.el = buildItem(it);
+      items.push(it);
+      $('list').appendChild(it.el);
+    }
+    setStatus(rejected.length ? 'Ignoré : ' + rejected.join(', ') : '', rejected.length > 0);
+    refresh();
+  }
+
+  function buildItem(it) {
+    const li = document.createElement('li'); li.className = 'item';
+    const row = document.createElement('div'); row.className = 'row';
+    const file = document.createElement('div'); file.className = 'file';
+    const badge = document.createElement('div'); badge.className = 'badge'; badge.setAttribute('aria-hidden', 'true');
+    badge.textContent = (it.file.name.match(/\.(mid|midi|kar)$/i) || ['', 'MID'])[1].toUpperCase().slice(0, 4);
+    const left = document.createElement('div');
+    const name = document.createElement('div'); name.className = 'name'; name.textContent = it.file.name;
+    const meta = document.createElement('div'); meta.className = 'meta'; meta.textContent = fmtSize(it.file.size);
+    left.append(name, meta);
+    file.append(badge, left);
+    const right = document.createElement('div'); right.className = 'side';
+    const state = document.createElement('span'); state.className = 'chip'; state.textContent = 'En attente';
+    const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'ghost'; rm.textContent = 'Retirer';
+    rm.setAttribute('aria-label', 'Retirer ' + it.file.name);
+    rm.addEventListener('click', () => {
+      if (it.state === 'busy') return;
+      items.splice(items.indexOf(it), 1); li.remove(); refresh();
+    });
+    right.append(state, rm);
+    row.append(file, right);
+    const bar = document.createElement('progress'); bar.max = 100; bar.value = 0;
+    bar.setAttribute('aria-label', 'Progression de ' + it.file.name);
+    li.append(row, bar);
+    it.progress = 0;
+    it.ui = { li, state, rm, bar };
+    return li;
+  }
+
+  function setState(it, state, text, cls) {
+    it.state = state;
+    it.ui.li.classList.remove('busy', 'done', 'failed');
+    if (state === 'busy') it.ui.li.classList.add('busy');
+    if (state === 'done') it.ui.li.classList.add('done');
+    if (state === 'error') it.ui.li.classList.add('failed');
+    it.ui.state.textContent = text;
+    it.ui.state.className = 'chip' + (cls ? ' ' + cls : '');
+    it.ui.rm.disabled = state === 'busy';
+  }
+
+  // Avancement d'un fichier : valeur réelle du serveur, ou barre indéterminée (sans attribut value) tant qu'inconnue
+  function setProgress(it, p, indeterminate) {
+    it.progress = p;
+    if (indeterminate) it.ui.bar.removeAttribute('value'); else it.ui.bar.value = pct(p);
+  }
+
+  // Avancement de toute la liste en cours de traitement
+  function updateOverall(queue, finished) {
+    const box = $('overall'); box.hidden = false;
+    const done = queue.filter(i => i.state === 'done' || i.state === 'error').length;
+    const total = queue.reduce((s, i) => s + (i.state === 'done' || i.state === 'error' ? 1 : i.progress), 0) / queue.length;
+    const p = finished ? 1 : total;
+    box.classList.toggle('finished', !!finished);
+    $('overallLabel').textContent = finished ? 'Terminé' : 'Fichier ' + Math.min(done + 1, queue.length) + ' sur ' + queue.length;
+    $('overallPct').textContent = pct(p) + ' %';
+    $('overallBar').value = pct(p);
+  }
+
+  function refresh() {
+    const todo = items.filter(i => i.state === 'pending' || i.state === 'error').length;
+    $('go').disabled = running || !todo || $('soundfont').disabled || !$('soundfont').value;
+    $('go').textContent = running ? 'Conversion en cours…' : (todo ? 'Convertir ' + plural(todo, 'fichier', 'fichiers') : 'Convertir');
+    $('go').classList.toggle('running', running);
+    $('clear').disabled = running || items.length === 0;
+    $('emptyList').hidden = items.length > 0;
+  }
+
+  // --- Conversion ---
+  const STAGES = { queued: 'En file d’attente', synth: 'Synthèse', encode: 'Encodage MP3' };
+
+  async function convertOne(it, queue) {
+    const fail = (msg) => { setProgress(it, 1, false); setState(it, 'error', msg, 'state-err'); };
+    const old = it.ui.li.querySelector('.result'); if (old) old.remove();
+    setProgress(it, 0, false);
+    setState(it, 'busy', 'Envoi…');
+    updateOverall(queue);
+    const fd = new FormData();
+    fd.append('file', it.file);
+    fd.append('title', it.file.name.replace(/\.(mid|midi|kar)$/i, ''));
+    fd.append('soundfont', $('soundfont').value);
+    fd.append('quality', $('quality').value);
+    fd.append('gain', $('gain').value);
+    fd.append('output_dir', outDir);
+    fd.append('folder', $('folder').value.trim());
+    fd.append('normalize', $('normalize').checked ? '1' : '0');
+    fd.append('reverb', $('reverb').checked ? '1' : '0');
+    fd.append('chorus', $('chorus').checked ? '1' : '0');
+    try {
+      const r = await fetch('/api/jobs', { method: 'POST', body: fd });
+      const job = await r.json().catch(() => ({}));
+      if (!r.ok) return fail(job.error || 'Erreur ' + r.status);
+
+      let misses = 0;
+      for (;;) {
+        await sleep(400);
+        let s;
+        try {
+          const pr = await fetch('/api/jobs/' + job.id);
+          if (!pr.ok) throw new Error(pr.status);
+          s = await pr.json(); misses = 0;
+        } catch (_) {
+          if (++misses >= 5) return fail('Connexion au serveur perdue.');
+          continue;
+        }
+        if (s.state === 'error') return fail(s.error || 'La conversion a échoué.');
+        if (s.state === 'done') {
+          setProgress(it, 1, false);
+          setState(it, 'done', 'Terminé · ' + fmtSize(s.size), 'state-ok');
+          showResult(it, job.id, s.saved_as, s.saved_path);
+          return;
+        }
+        const label = STAGES[s.state] || 'Conversion';
+        setProgress(it, s.progress, s.state === 'synth' && s.progress === 0);
+        setState(it, 'busy', s.state === 'queued' ? label : label + ' · ' + pct(s.progress) + ' %');
+        updateOverall(queue);
+      }
+    } catch (_) {
+      fail('Connexion au serveur impossible.');
+    }
+  }
+
+  function showResult(it, jobId, savedAs, savedPath) {
+    const old = it.ui.li.querySelector('.result'); if (old) old.remove();
+    const url = '/api/jobs/' + jobId + '/audio';
+    const box = document.createElement('div'); box.className = 'result';
+    const audio = document.createElement('audio'); audio.controls = true; audio.preload = 'metadata'; audio.src = url;
+    audio.setAttribute('aria-label', 'Écouter ' + savedAs);
+    const a = document.createElement('a'); a.href = url + '?download=1'; a.textContent = 'Télécharger';
+    const saved = document.createElement('div'); saved.className = 'saved'; saved.textContent = 'Enregistré : ' + savedPath;
+    box.append(audio, a, saved);
+    it.ui.li.appendChild(box);
+  }
+
+  // Un seul morceau joue à la fois
+  $('list').addEventListener('play', e => {
+    document.querySelectorAll('#list audio').forEach(a => { if (a !== e.target) a.pause(); });
+  }, true);
+
+  $('go').addEventListener('click', async () => {
+    running = true; refresh(); setStatus('');
+    const queue = items.filter(i => i.state === 'pending' || i.state === 'error');
+    queue.forEach(i => setProgress(i, 0, false));
+    let ok = 0;
+    for (const it of queue) { await convertOne(it, queue); if (it.state === 'done') ok++; }
+    running = false; refresh();
+    updateOverall(queue, true);
+    setStatus((ok > 1 ? ok + ' fichiers convertis' : ok + ' fichier converti') + ' sur ' + queue.length + '.', ok < queue.length);
+  });
+
+  $('clear').addEventListener('click', () => {
+    items.length = 0; $('list').textContent = ''; setStatus(''); $('overall').hidden = true; refresh();
+  });
+
+  // --- Dépôt ---
+  const drop = $('drop');
+  $('picker').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+  ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+  // Empêche le navigateur d'ouvrir un fichier lâché à côté de la zone
+  ['dragover', 'drop'].forEach(ev => window.addEventListener(ev, e => e.preventDefault()));
+
+  refresh();
+})();
+</script>
+</body>
+</html>

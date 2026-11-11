@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Produits de la conversion et sons (volumineux, licences propres)
+output/
+soundfonts/
+*.mp3
+*.sf2
+*.sf3
+
+# Construction de l'executable Windows
+build/
+dist/
+*.spec
+
+# Editeur / systeme
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
