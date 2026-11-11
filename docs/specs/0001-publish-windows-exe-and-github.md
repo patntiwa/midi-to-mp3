@@ -1,7 +1,7 @@
 # 0001. Publier MIDI vers MP3 sur GitHub avec un exécutable Windows léger et une interface affinée
 
 **Date**: 2026-11-11
-**Status**: Proposed
+**Status**: Accepted
 
 ## Summary
 
